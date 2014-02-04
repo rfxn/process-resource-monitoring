@@ -1,0 +1,667 @@
+#!/bin/bash
+#
+##
+# Process Resource Monitor (PRM) v1.1.4
+#             (C) 2002-2012, R-fx Networks <proj@r-fx.org>
+#             (C) 2012, Ryan MacDonald <ryan@r-fx.org>
+# This program may be freely redistributed under the terms of the GNU GPL v2
+##
+#
+
+inspath=/usr/local/prm
+cnf=$inspath/conf.prm
+intcnf=$inspath/internals.conf
+appn=prm
+ver=1.1.4
+res_col="1"
+move_to_col="echo -en \\033[${res_col}G"
+
+header() {
+        echo "Process Resource Monitor (PRM) v$ver"
+        echo "            (C) 2002-2012, R-fx Networks <proj@r-fx.org>"
+        echo "            (C) 2012, Ryan MacDonald <ryan@r-fx.org>"
+        echo "This program may be freely redistributed under the terms of the GNU GPL v2"
+        echo ""
+}
+
+if [ -f "$cnf" ] && [ ! "$cnf" == "" ]; then
+   source $cnf
+else
+   header
+   echo "prm[$$]: {glob} $cnf not found, aborting."
+   exit 1
+fi
+
+if [ -f "$intcnf" ] && [ ! "$intcnf" == "" ]; then
+   source $intcnf
+else
+   header
+   echo "prm[$$]: {glob} $intcnf not found, aborting."
+   exit 1
+fi
+
+
+
+trim_log() {
+log=$1
+logtrim=$2
+if [ -f "$log" ]; then
+  log_size=`wc -l $log | awk '{print$1}'`
+  if [ "$log_size" -gt "$logtrim" ]; then
+    trim=$[logtrim/10]
+    printf "%s\n" "$trim,${log_size}d" w | ed -s $log
+  fi
+fi
+}
+
+eout() {
+string=$1
+outstate=$2
+
+        trim_log $LOG_FILE 10000
+        if [ ! "$string" == "" ]; then
+                if [ "$outstate" == "1" ]; then
+                        echo "$(date +"%b %d %H:%M:%S") $HOST $appn[$$]: $string" >> $LOG_FILE
+                else
+                        $move_to_col && echo "$appn[$$]: $string"
+                        echo "$(date +"%b %d %H:%M:%S") $HOST $appn[$$]: $string" >> $LOG_FILE
+                fi
+
+                if [ "$LOG_SYSLOG" == "1" ]; then
+                        if [ -f "$LOGGER" ]; then
+                                $LOGGER -t "prm[$$]" -p "$LOG_LEVEL" "$string"
+                        else
+                                echo "$(date +"%b %d %H:%M:%S") $HOST prm[$$]: $string" >> /var/log/messages
+                        fi
+                fi
+        fi
+}
+
+logkill() {
+lpids="$1"
+        if [ ! -f "$LOG_FILE_KILL" ]; then
+                touch $LOG_FILE_KILL
+                chmod 640 $LOG_FILE_KILL
+        else
+                trim_log $LOG_FILE_KILL 10000
+        fi
+        for pid in `echo $lpids`; do
+                if [ ! -z "$pid" ]; then
+                        string=`cat $PSLIST_CACHE.full | awk -v gpid=$pid '{ if ($2 == gpid) print $0 }' | awk '{print"PPID "$1" PID "$2 " USER "$3" %CPU "$4" %MEM "$5" RSS "$6" ETIME "$7" CMD "$10,$11,$12,$13,$14,$15,$16,$17}'`
+                        if [ ! -z "$string" ]; then
+                                echo "$(date +"%b %d %H:%M:%S") $HOST $appn[$$]: [$MAX_NAME]: $string" >> $LOG_FILE_KILL
+                        fi
+                fi
+        done
+}
+
+get_state() {
+UTIME=`date +"%s"`
+
+if [ -f "$LOCK_FILE" ]; then
+        OVAL=`cat $LOCK_FILE`
+        DIFF=$[UTIME-OVAL]
+        if [ "$DIFF" -gt "$LOCK_TIMEOUT" ]; then
+                echo "$UTIME" > $LOCK_FILE
+                if [ -f "$inspath/tmp/prm.pid" ]; then
+                        opid=`cat $inspath/tmp/prm.pid`
+                        kill -9 $opid >> /dev/null 2>&1
+                        eout "cleared stale lock file ($DIFF > $LOCK_TIMEOUT) and killed pid $opid."
+                else
+                        eout "cleared stale lock file ($DIFF > $LOCK_TIMEOUT)."
+                fi
+        else
+                header
+                if [ -f "$inspath/tmp/prm.pid" ]; then
+                        opid=`cat $inspath/tmp/prm.pid`
+                        eout "locked subsystem by pid $opid ($LOCK_FILE is $DIFF seconds old), aborting."
+                        exit 1
+                else
+                        eout "locked subsystem, already running ? ($LOCK_FILE is $DIFF seconds old), aborting."
+                        exit 1
+                fi
+        fi
+fi
+
+echo "$$" > $inspath/tmp/prm.pid
+echo "$UTIME" > $LOCK_FILE
+}
+
+
+pre() {
+        if [ ! -f "$IGNORE_USER" ]; then
+                touch $IGNORE_USER
+                chmod 640 $IGNORE_USER
+        fi
+        if [ ! -f "$IGNORE_CMD" ]; then
+                touch $IGNORE_CMD
+                chmod 640 $IGNORE_CMD
+        fi
+}
+
+get_pslist() {
+        if [ ! -f "PSLIST_CACHE" ]; then
+                touch $PSLIST_CACHE
+                chmod 640 $PSLIST_CACHE
+        fi
+        if [ ! -f "$IGNORE_PSLIST" ]; then
+                touch $IGNORE_PSLIST
+                chmod 640 $IGNORE_PSLIST
+        fi
+        if [ "$IGNORE_ROOT" == "1" ]; then
+                /bin/nice -n 19 /bin/ps --no-headers --user root -N -o "ppid pid user pcpu pmem rss etime nice comm cmd" --sort comm | grep -vwf $IGNORE_PSLIST > $PSLIST_CACHE
+                /bin/nice -n 19 /bin/ps --no-headers -A -o "ppid pid user pcpu pmem rss etime nice comm cmd" --sort comm > $PSLIST_CACHE.full
+        else
+                /bin/nice -n 19 /bin/ps --no-headers -A -o "ppid pid user pcpu pmem rss etime nice comm cmd" --sort comm > $PSLIST_CACHE.full
+                cat $PSLIST_CACHE.full | grep -vwf $IGNORE_PSLIST > $PSLIST_CACHE
+        fi
+}
+
+
+recheck_proc() {
+rpid=$1
+col=$2
+if [ "$col" == "proc" ]; then
+        rval=`/bin/nice -n 19 /bin/ps --no-headers -C $cmd -o "pid comm" | wc -l | awk '{print$1}'`
+else
+        rval=`/bin/nice -n 19 /bin/ps --no-headers -p $rpid -o "pid $col" | awk '{print$2}' | cut -d'.' -f1 | tr -d '\:-'`
+fi
+if [ "$rval" == "" ]; then
+        rval=0
+fi
+}
+
+get_procinfo() {
+for i in `cat $PSLIST_CACHE | tr ' ' '^'`; do
+      i=`echo $i | tr '^' ' '`
+      ppid=`echo $i | awk '{print$1}'`
+      pid=`echo $i | awk '{print$2}'`
+      user=`echo $i | awk '{print$3}' | grep -vf $IGNORE_USER`
+      cpu=`echo $i | awk '{print$4}' | tr '.' ' ' | awk '{print$1}'`
+      mem=`echo $i | awk '{print$5}' | tr '.' ' ' | awk '{print$1}'`
+      rss=`echo $i | awk '{print$6}' | tr '.' ' ' | awk '{print$1}'`
+      rssmb=$[rss/1024]
+      if [ "$MAX_MEM" -gt "99" ]; then
+        mem=$rssmb
+      fi
+      etime=`echo $i | awk '{print$7}' | tr -d '\:-'`
+      etime_full=`echo $i | awk '{print$7}'`
+      nice=`echo $i | awk '{print$8}'`
+      cmd=`echo $i | awk '{print$9}' | grep -vf $IGNORE_CMD`
+      cmd_full=`echo $i | awk '{print$10,$11,$12,$13,$14}'`
+      include_cmd=`echo "$cmd" | tr -d '[:cntrl:]'`
+      proc=`cat $PSLIST_CACHE | grep -w "$cmd" | wc -l | awk '{print$1}'`
+
+      if [ "$ppid" ] && [ "$pid" ] && [ "$cpu" ] && [ "$mem" ] && [ "$etime" ] && [ "$cmd" ] && [ "$user" ] && [ "$cmd" ]; then
+       user_ignore=`cat $IGNORE_USER | grep -w "$user"`
+       if [ ! -z "$user_ignore" ]; then
+        skip=1
+       fi
+       cmd_ignore=`cat $IGNORE_CMD | grep -w "$cmd"`
+       if [ ! -z "$cmd_ignore" ]; then
+        skip=1
+       fi
+       if [ ! "$skip" == "1" ]; then
+        . $cnf
+        . $intcnf
+        $move_to_col && echo -n "$appn[$$]: checking proc pid:$pid {user:$user cmd:$cmd}                 "
+        if [ -f "$RULES/$user.user" ]; then
+                . $RULES/$user.user
+                rules_run=1
+        elif [ -f "$RULES/$cmd.cmd" ]; then
+                . $RULES/$include_cmd.cmd
+                rules_run=1
+        fi
+
+        if [ ! -z "$IGNORE" ]; then
+         user_ignore=`echo $user | grep -E "($IGNORE)"`
+         cmd_ignore=`echo $cmd | grep -E "($IGNORE)"`
+         if [ ! -z "$user_ignore" ] || [ ! -z "$cmd_ignore" ]; then
+                skip=1
+         fi
+        fi
+
+        if [ "$RULES_ONLY" == "1" ] && [ "$rules_run" == "1" ] && [ ! "$skip" == "1" ]; then
+                check_proc
+        elif [ "$RULES_ONLY" == "0" ] && [ ! "$skip" == "1" ]; then
+                check_proc
+        fi
+
+       fi
+      fi
+      unset ppid pid user cpu mem etime cmd rules_run used_cpu used_mem used_proc used_etime skip rval fcnt cnt child_pidlist pidlist IGNORE
+done
+}
+
+alert() {
+if [ "$EMAIL_ALERT" == "1" ] && [ -f "$EMAIL_TMPL" ]; then
+        eout "email alert sent to $EMAIL_ADDR for proc $pid"
+        . $EMAIL_TMPL
+        cat $tmpemail | mail -s "$EMAIL_SUBJ" "$EMAIL_ADDR"
+elif [ ! -f "$EMAIL_TMPL" ]; then
+        eout "email template $EMAIL_TMPL could not be found, alert not sent!"
+fi
+}
+
+kill_check() {
+MAX_NAME=$1
+MAX_VAL=$2
+PS_COL=$3
+PS_VAL=$4
+
+if [ ! -z "$MAX_VAL" ]; then
+
+if [ "$PS_VAL" -ge "$MAX_VAL" ] && [ ! "$MAX_VAL" == "0" ]; then
+ cnt=0
+ fcnt=0
+ if [ "$MAX_NAME" == "MAX_ETIME" ]; then
+        fcnt=$KILL_TRIG
+        cnt=$KILL_TRIG
+        recheck_proc $pid $PS_COL
+ fi
+ if [ "$MAX_NAME" == "MAX_PROC" ]; then
+        fcnt=$KILL_TRIG
+        cnt=$KILL_TRIG
+        recheck_proc $pid $PS_COL
+ fi
+ while [ "$cnt" -lt "$KILL_TRIG" ]; do
+        cnt=$[cnt+1]
+        recheck_proc $pid $PS_COL
+        if [ "$rval" -ge "$MAX_VAL" ]; then
+                eout "soft fail #$cnt $MAX_NAME use:${rval} limit:${MAX_VAL} pid:$pid user:$user cmd:$cmd_full"
+                #eout "proc pid:$pid {user:$user cmd:$cmd} soft fail #$cnt $MAX_NAME use:${rval}/max:${MAX_VAL}"
+                fcnt=$[fcnt+1]
+        else
+                # eout "proc pid:$pid {user:$user cmd:$cmd} has gone away or come out of soft fail"
+                break
+        fi
+        sleep $KILL_WAIT
+ done
+
+ if [ "$fcnt" -ge "$KILL_TRIG" ]; then
+        if [ "$KILL_PARENT" == "1" ] && [ "$ppid" -gt "$KILL_MINPID" ]; then
+                child_pidlist=`/bin/nice -n 19 /bin/ps --pid $pid -o "pid" --ppid $ppid --no-headers | tr '\n' ' '`
+                child_pidlist="${child_pidlist%?}"
+                for i in `echo $child_pidlist`; do
+                        if [ "$pidlist" ]; then
+                                pidlist="$pidlist $i"
+                        else
+                                pidlist="$i"
+                        fi
+                done
+                if [ "$ALERT_ONLY" == "1" ]; then
+                 pidlist="$ppid $pidlist"
+                 eout "HARD FAIL $MAX_NAME use:${rval} limit:${MAX_VAL} mode:alert-only ppid:$ppid pidlist:$pid user:$user cmd:$cmd_full"
+                 #eout "proc ppid:$ppid pid:$pid {user:$user cmd:$cmd} HARD FAIL $MAX_NAME use:${rval}/max:${MAX_VAL} ALERT ONLY PARENT/CHILDREN pidlist:$ppid $pidlist"
+                 alert
+                else
+                 if [ ! "$KILL_RESTART_CMD" ]; then
+                  eout "HARD FAIL $MAX_NAME use:${rval} limit:${MAX_VAL} mode:killall ppid:$ppid pidlist:$pidlist user:$user cmd:$cmd_full"
+                  #eout "proc ppid:$ppid pid:$pid {user:$user cmd:$cmd} HARD FAIL $MAX_NAME use:${rval}/max:${MAX_VAL} KILLING PARENT/CHILDREN pidlist:$ppid $pidlist"
+                 fi
+                 # KILL PARENT FIRST SO IT WILL NOT SPAWN NEW CHILDREN
+                 kill -${KILL_SIG} $ppid >> /dev/null 2>&1
+
+                 # KILL CHILDREN
+                 kill -${KILL_SIG} $pidlist >> /dev/null 2>&1
+
+                 # KILL EVERYTHING AGAIN FOR GOOD MEASURE
+                 kill -${KILL_SIG} $ppid $pidlist >> /dev/null 2>&1
+
+                 # LOG KILL ACTIONS
+                 logkill "$pidlist"
+
+                 if [ "$KILL_RESTART_CMD" ]; then
+                        eout "HARD FAIL $MAX_NAME use:${rval} limit:${MAX_VAL} mode:killall ppid:$ppid pidlist:$pidlist user:$user cmd:$cmd_full restart-cmd:$KILL_RESTART_CMD"
+                        #eout "proc ppid:$ppid pid:$pid {user:$user cmd:$cmd} KILL_RESTART_CMD SET, running: '$KILL_RESTART_CMD'"
+                        $KILL_RESTART_CMD >> /dev/null 2>&1 &
+                        sleep 2
+                 fi
+
+                 pidlist="$ppid $pidlist"
+                 alert
+                fi
+        elif [ "$KILL_PARENT" == "1" ] && [ "$ppid" -le "$KILL_MINPID" ]; then
+                if [ "$ALERT_ONLY" == "1" ]; then
+                 pidlist="$pid"
+                 eout "HARD FAIL $MAX_NAME use:${rval} limit:${MAX_VAL} mode:alert-only pidlist:$pidlist user:$user cmd:$cmd_full"
+                 #eout "proc pid:$pid {user:$user cmd:$cmd} HARD FAIL $MAX_NAME use:${rval}/max:${MAX_VAL} ALERT ONLY pid:$pid"
+                 alert
+                else
+                 eout "proc ppid:$ppid lower than KILL_MINPID $KILL_MINPID, ignoring KILL_PARENT"
+                 kill -${KILL_SIG} $pid >> /dev/null 2>&1
+                 kill -${KILL_SIG} $pid >> /dev/null 2>&1
+
+                 # LOG KILL ACTIONS
+                 logkill "$pid"
+                 if [ ! "$KILL_RESTART_CMD" ]; then
+                         eout "HARD FAIL $MAX_NAME use:${rval} limit:${MAX_VAL} mode:kill-pid pidlist:$pidlist user:$user cmd:$cmd_full"
+                         #eout "proc pid:$pid {user:$user cmd:$cmd} HARD FAIL $MAX_NAME use:${rval}/max:${MAX_VAL} KILLED pid:$pid"
+                 fi
+                 if [ "$KILL_RESTART_CMD" ]; then
+                        eout "HARD FAIL $MAX_NAME use:${rval} limit:${MAX_VAL} mode:kill-pid pidlist:$pidlist user:$user cmd:$cmd_full restart-cmd:$KILL_RESTART_CMD"
+                        #eout "proc ppid:$ppid pid:$pid {user:$user cmd:$cmd} KILL_RESTART_CMD SET, running: '$KILL_RESTART_CMD'"
+                        $KILL_RESTART_CMD >> /dev/null 2>&1 &
+                        sleep 2
+                 fi
+                 pidlist="$pid"
+                 alert
+                fi
+        else
+                if [ "$ALERT_ONLY" == "1" ]; then
+                 pidlist="$pid"
+                 eout "HARD FAIL $MAX_NAME use:${rval} limit:${MAX_VAL} mode:alert-only pidlist:$pidlist user:$user cmd:$cmd_full"
+                 #eout "proc pid:$pid {user:$user cmd:$cmd} HARD FAIL $MAX_NAME use:${rval}/max:${MAX_VAL} ALERT ONLY pid:$pid"
+                 alert
+                else
+                 kill -${KILL_SIG} $pid >> /dev/null 2>&1
+                 kill -${KILL_SIG} $pid >> /dev/null 2>&1
+                 # LOG KILL ACTIONS
+                 logkill "$pid"
+                 #eout "HARD FAIL $MAX_NAME use:${rval} limit:${MAX_VAL} mode:kill-pid pidlist:$pidlist user:$user cmd:$cmd_full"
+                 #eout "proc pid:$pid {user:$user cmd:$cmd} HARD FAIL $MAX_NAME use:${rval}/max:${MAX_VAL} KILLED pid:$pid"
+                 if [ "$KILL_RESTART_CMD" ]; then
+                        eout "HARD FAIL $MAX_NAME use:${rval} limit:${MAX_VAL} mode:kill-pid pidlist:$pidlist user:$user cmd:$cmd_full restart-cmd:$KILL_RESTART_CMD"
+                        #eout "proc ppid:$ppid pid:$pid {user:$user cmd:$cmd} KILL_RESTART_CMD SET, running: '$KILL_RESTART_CMD'"
+                        $KILL_RESTART_CMD >> /dev/null 2>&1 &
+                        sleep 2
+                 else
+                        eout "HARD FAIL $MAX_NAME use:${rval} limit:${MAX_VAL} mode:kill-pid pidlist:$pidlist user:$user cmd:$cmd_full"
+                 fi
+                 pidlist="$pid"
+                 alert
+                fi
+        fi
+ fi
+fi
+fi
+}
+
+check_proc() {
+# check_etime
+MAX_ETIME=`echo $MAX_ETIME | tr -d '\:-'`
+kill_check MAX_ETIME "$MAX_ETIME" "etime" "$etime"
+
+# check_proc
+kill_check MAX_PROC "$MAX_PROC" "proc" "$proc"
+
+# check_mem
+kill_check MAX_MEM "$MAX_MEM" "pmem" "$mem"
+
+# check_cpu
+kill_check MAX_CPU "$MAX_CPU" "pcpu" "$cpu"
+
+# set niceness levels
+setnice $pid
+}
+
+setnice() {
+spri=$1
+
+if [ "$spri" == "prios" ]; then
+        . $cnf
+        if [ "$MAX_MEM" -gt "99" ]; then
+                cat $PSLIST_CACHE.full | awk '{print$4,$6,$2,$3,$9}' | sort -n -t$'\t' -k2,1 | tail -n5 | tr ' ' '%' > $PSLIST_CACHE.top
+                setrss=1
+        else
+                cat $PSLIST_CACHE.full | awk '{print$4,$5,$2,$3,$9}' | sort -n -t$'\t' -k2,1 | tail -n5 | tr ' ' '%' > $PSLIST_CACHE.top
+        fi
+        for top in `cat $PSLIST_CACHE.top`; do
+                cpu=`echo $top | tr '%' ' ' | awk '{print$1}' | tr '.' ' ' | awk '{print$1}'`
+                mem=`echo $top | tr '%' ' ' | awk '{print$2}' | tr '.' ' ' | awk '{print$1}'`
+                if [ "$setrss" ]; then
+                        mem=$[mem/1024]
+                        topmem="128"
+                else
+                        topmem=10
+                fi
+                pid=`echo $top  | tr '%' ' ' | awk '{print$3}'`
+                user=`echo $top | tr '%' ' ' | awk '{print$4}'`
+                cmd=`echo $top | tr '%' ' ' | awk '{print$5}'`
+                ni=`/bin/ps -p $pid -o 'nice' --no-headers | tr -d ' '`
+                if [ -z "$ni" ]; then
+                        ni=0
+                fi
+                if [ "$cpu" -gt "75" ] || [ "$mem" -gt "$topmem" ]; then
+                 if [ ! "$ni" -lt "0" ] && [ ! "$ni" == "$NICE_TOP" ]; then
+                        /usr/bin/renice $NICE_TOP $pid >> /dev/null 2>&1
+                        /usr/bin/ionice -c 2 -n $IONICE_TOP -p $pid >> /dev/null 2>&1
+                        if [ "$setrss" ]; then
+                                mem="${mem}M"
+                        fi
+                        eout "top usage process $pid priority changed to cpunice:$NICE_TOP ionice:$IONICE_TOP {pid:$pid user:$user cpu:$cpu mem:$mem cmd:$cmd ni:$ni}" 1
+                 fi
+                fi
+        done
+        rm -f $PSLIST_CACHE.top
+
+        pfile="$priofile_high"
+        if [ -f "$pfile" ]; then
+                for rname in `cat $pfile | tr -d '[]' | tr -d '\\\'`; do
+                        pids=`cat $PSLIST_CACHE.full | grep -w "$rname" | awk '{print$2}' | tr '\n' ' '`
+                        /usr/bin/renice $NICE_HIGH $pids >> /dev/null 2>&1
+                        for iopid in $pids; do
+                                /usr/bin/ionice -c 2 -n $IONICE_HIGH -p $iopid >> /dev/null 2>&1
+                        done
+                done
+        fi
+
+        pfile="$priofile_med_high"
+        if [ -f "$pfile" ]; then
+                for rname in `cat $pfile | tr -d '[]' | tr -d '\\\'`; do
+                        pids=`cat $PSLIST_CACHE.full | grep -w "$rname" | awk '{print$2}' | tr '\n' ' '`
+                        /usr/bin/renice $NICE_MED_HIGH $pids >> /dev/null 2>&1
+                        for iopid in $pids; do
+                                /usr/bin/ionice -c 2 -n $IONICE_MED_HIGH -p $iopid >> /dev/null 2>&1
+                        done
+                done
+        fi
+
+        pfile="$priofile_med"
+        if [ -f "$pfile" ]; then
+                for rname in `cat $pfile | tr -d '[]' | tr -d '\\\'`; do
+                        pids=`cat $PSLIST_CACHE.full | grep -w "$rname" | awk '{print$2}' | tr '\n' ' '`
+                        /usr/bin/renice $NICE_MED $pids >> /dev/null 2>&1
+                        for iopid in $pids; do
+                                /usr/bin/ionice -c 2 -n $IONICE_MED -p $iopid >> /dev/null 2>&1
+                        done
+                done
+        fi
+
+        pfile="$priofile_med_low"
+        if [ -f "$pfile" ]; then
+                for rname in `cat $pfile | tr -d '[]' | tr -d '\\\'`; do
+                        pids=`cat $PSLIST_CACHE.full | grep -w "$rname" | awk '{print$2}' | tr '\n' ' '`
+                        /usr/bin/renice $NICE_MED_LOW $pids >> /dev/null 2>&1
+                        for iopid in $pids; do
+                                /usr/bin/ionice -c 2 -n $IONICE_MED_LOW -p $iopid >> /dev/null 2>&1
+                        done
+                done
+        fi
+
+        pfile="$priofile_low"
+        if [ -f "$pfile" ]; then
+                for rname in `cat $pfile | tr -d '[]' | tr -d '\\\'`; do
+                        pids=`cat $PSLIST_CACHE.full | grep -w "$rname" | awk '{print$2}' | tr '\n' ' '`
+                        /usr/bin/renice $NICE_LOW $pids >> /dev/null 2>&1
+                        for iopid in $pids; do
+                                /usr/bin/ionice -c 2 -n $IONICE_LOW -p $iopid >> /dev/null 2>&1
+                        done
+                done
+        fi
+        /usr/bin/renice $NICE_DEFAULT 1 >> /dev/null 2>&1
+        /usr/bin/ionice -c 2 -n $IONICE_DEFAULT -p 1 >> /dev/null 2>&1
+ else
+ if [ "$NICE_DEFAULT" ] && [ "$IONICE_DEFAULT" ]; then
+  if [ "$pid" ]; then
+        niceuser=`/bin/ps -p $pid --no-headers -o "user"`
+        if [ ! "$niceuser" == "root" ]; then
+                /usr/bin/renice $NICE_DEFAULT $pid >> /dev/null 2>&1
+                /usr/bin/ionice -c 2 -n $IONICE_DEFAULT -p $pid >> /dev/null 2>&1
+        fi
+  fi
+ fi
+fi
+
+}
+
+prmtop() {
+ procs=$1
+ watch=$2
+
+ if [ -f "$LOG_FILE_KILL" ]; then
+        KNCPU=`cat $LOG_FILE_KILL | grep "$(date +"%b %d")" | awk '{print$6}' | grep MAX_CPU | wc -l`
+        KNMEM=`cat $LOG_FILE_KILL | grep "$(date +"%b %d")" | awk '{print$6}' | grep MAX_MEM | wc -l`
+        KNETIME=`cat $LOG_FILE_KILL | grep "$(date +"%b %d")" | awk '{print$6}' | grep MAX_ETIME | wc -l`
+        KNPROC=`cat $LOG_FILE_KILL | grep "$(date +"%b %d")" | awk '{print$6}' | grep MAX_PROC | wc -l`
+ fi
+
+ while true; do
+         if [ "$watch" ]; then
+                clear
+         fi
+         /usr/bin/uptime
+         if [ -f "/usr/bin/iostat" ]; then
+                echo -n " " && /usr/bin/iostat | sed -n '3,4p'
+         fi
+         memtot=`free -m | grep Mem | awk '{print$2}'`
+         memuse=`free -m | grep Mem | awk '{print$3}'`
+         memfree=`free -m | grep Mem | awk '{print$4}'`
+         echo " memory: total $memtot use $memuse free $memfree"
+         if [ -f "$LOG_FILE_KILL" ]; then
+                echo -n " " && echo "kill-events: max_cpu $KNCPU max_mem $KNMEM max_etime $KNETIME max_proc $KNPROC"
+                echo
+         fi
+         echo "CPU% MEM% PID USER CMD" | tr ' ' '\t' ;
+         /bin/nice -n 19 /bin/ps --no-headers -A -o "ppid pid user pcpu pmem rss etime comm cmd" --sort comm | awk '{print$4"\t"$5"\t"$2"\t"$3"\t"$9}' | sort -n -t$'\t' -k2,1 | tail -n$procs | tac
+         if [ -z "$watch" ]; then
+                exit
+         fi
+         sleep 10
+         clear
+ done
+}
+
+usersb() {
+ limit=$1
+ watch=$2
+
+ if [ -f "$LOG_FILE_KILL" ]; then
+        KNCPU=`cat $LOG_FILE_KILL | grep "$(date +"%b %d")" | awk '{print$6}' | grep MAX_CPU | wc -l`
+        KNMEM=`cat $LOG_FILE_KILL | grep "$(date +"%b %d")" | awk '{print$6}' | grep MAX_MEM | wc -l`
+        KNETIME=`cat $LOG_FILE_KILL | grep "$(date +"%b %d")" | awk '{print$6}' | grep MAX_ETIME | wc -l`
+        KNPROC=`cat $LOG_FILE_KILL | grep "$(date +"%b %d")" | awk '{print$6}' | grep MAX_PROC | wc -l`
+ fi
+
+ while true; do
+         if [ "$watch" ]; then
+                clear
+         fi
+         /usr/bin/uptime
+         if [ -f "/usr/bin/iostat" ]; then
+                echo -n " " && /usr/bin/iostat | sed -n '3,4p'
+         fi
+         memtot=`free -m | grep Mem | awk '{print$2}'`
+         memuse=`free -m | grep Mem | awk '{print$3}'`
+         memfree=`free -m | grep Mem | awk '{print$4}'`
+         echo " memory: total $memtot use $memuse free $memfree"
+         if [ -f "$LOG_FILE_KILL" ]; then
+                echo -n " " && echo "kill-events: max_cpu $KNCPU max_mem $KNMEM max_etime $KNETIME max_proc $KNPROC"
+                echo
+         fi
+
+         if [ -f "$LOG_FILE_KILL" ]; then
+          tmpsb=$inspath/tmp/.usersb$$
+          echo "USER MAX_CPU MAX_MEM MAX_ETIME MAX_PROC" > $tmpsb
+          for i in `cat $LOG_FILE_KILL | grep "$(date +"%b %d")" | awk '{print$12}' | sort | uniq`; do
+                ukncpu=`cat $LOG_FILE_KILL | grep "$(date +"%b %d")" | grep -w $i | grep MAX_CPU | wc -l`
+                uknmem=`cat $LOG_FILE_KILL | grep "$(date +"%b %d")" | grep -w $i | grep MAX_MEM | wc -l`
+                uknetime=`cat $LOG_FILE_KILL | grep "$(date +"%b %d")" | grep -w $i | grep MAX_ETIME | wc -l`
+                uknproc=`cat $LOG_FILE_KILL | grep "$(date +"%b %d")" | grep -w $i | grep MAX_PROC | wc -l`
+                echo "$i $ukncpu $uknmem $uknetime $uknproc" >> $tmpsb.usr
+          done
+	  if [ -f "$tmpsb.usr" ]; then
+           cat $tmpsb.usr | sort -n -k 2,2n -k 3,3n -k 4,4n -k 5,5n | tail -n $limit | tac >> $tmpsb
+           cat $tmpsb | column -t
+           rm -f $tmpsb*
+	  else
+	   echo "No user kill events to scoreboard."
+	   rm -f $tmpsb*
+	  fi
+         else
+                echo "No user kill events to scoreboard."
+         fi
+         if [ -z "$watch" ]; then
+                exit
+         fi
+         sleep 10
+         clear
+ done
+}
+
+usage() {
+                echo "usage $0 [-c|--check] [-q|--quiet] [-t N watch|--top N watch] [-l|--log]"
+                echo "-c|--check                run prm checks with verbose output"
+                echo "-q|--quiet                run prm checks with no output"
+                echo "-s|--scores N watch       display system stats and top N user kill scores (15 default), optionally watching"
+                echo "-t|--top N watch          display system stats and top N processes (15 default), optionally watching"
+                echo "-l|--log                  view in reverse order the prm log file"
+}
+
+if [ -z "$1" ]; then
+        header
+        usage
+else
+ while [ -n "$1" ]; do
+  case "$1" in
+        c|-c|--check)
+                header
+                start=`date +"%s"`
+                get_state
+                pre
+                get_pslist
+                get_procinfo
+                setnice prios
+                end=`date +"%s"`
+                runtime=$[end-start]
+                ps_size=`wc -l $PSLIST_CACHE | awk '{print$1}'`
+                echo && echo "prm[$$]: checked $ps_size processes in ${runtime} seconds                                           "
+                eout "checked $ps_size processes in ${runtime} seconds" 1
+                rm -f $LOCK_FILE
+                ;;
+        q|-q|--quiet)
+                $0 -c >> /dev/null 2>&1
+                ;;
+        t|-t|--top)
+                shift
+                procs=`echo $1 | tr -d '[:alpha:]'`
+                if [ -z "$procs" ]; then
+                        procs=15
+                fi
+                if [[ "$@" =~ "watch|w" ]]; then
+                        watch=1
+                fi
+                prmtop $procs $watch
+                ;;
+        s|-s|-sb|--scores|--score|--scoreboard)
+                shift
+                limit=`echo $1 | tr -d '[:alpha:]'`
+                if [ -z "$limit" ]; then
+                        limit=15
+                fi
+                if [[ "$@" =~ "watch|w" ]]; then
+                        watch=1
+                fi
+                usersb $limit $watch
+                ;;
+        l|-l|--log)
+                tac $LOG_FILE | more
+                ;;
+        *)
+                header
+                usage
+        esac
+        shift
+ done
+fi
+

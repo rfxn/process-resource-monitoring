@@ -1,0 +1,157 @@
+#!/bin/bash
+#
+##
+# Process Resource Monitor (PRM) v1.1.4
+#             (C) 2002-2012, R-fx Networks <proj@r-fx.org>
+#             (C) 2012, Ryan MacDonald <ryan@r-fx.org>
+# This program may be freely redistributed under the terms of the GNU GPL v2
+##
+#
+
+##
+# [ EMAIL ALERTS ]
+##
+# The default email alert toggle
+# [0 = disabled, 1 = enabled]
+EMAIL_ALERT=0
+
+# The subject line for email alerts
+EMAIL_SUBJ="Process Resource Alert for $(hostname)"
+
+# The destination addresses for email alerts
+# [ values are comma (,) spaced ]
+EMAIL_ADDR="root"
+
+##
+# [ Process Options ]
+##
+# The intended usage of PRM is rule based but you can turn this off to have
+# the full process table checked and apply the global resource limits
+# NOTE: this does not disable rules, they still apply where matches found
+# [0 = disabled, 1 = enabled]
+RULES_ONLY="1"
+
+# Do not kill processes, only send alerts
+# [0 = disabled, 1 = enabled]
+ALERT_ONLY="0"
+
+# All root owned processes will be ignored - !! recommended !!
+# [0 = disabled, 1 = enabled]
+IGNORE_ROOT="1"
+
+# Define a global list, in extended regex format, of ignore values applied on
+# user name and command - on match - the process will be ignored
+# NOTE: this can be defined on a per-rule basis, overridding the value here
+# e.g: IGNORE="^httpd$|^exim$|^cgiwrap$|^suphp$"
+IGNORE=""
+
+##
+# [ Process Resource Settings ] 
+# NOTE: these variables may be used in rule files, these are defaults when a
+# rule file does not define them!
+# NOTE: 0 value disables any of the respective resource checks
+##
+
+# Maximum amount of CPU usage, percentage of total
+MAX_CPU="50"
+
+# Maximum amount of MEM usage, percentage of total or kbyte
+# values 1-99 treated as percentage of total, 100+ treated as Mbyte of memory
+# e.g: MAX_MEM="20" is 20% of total memory, MAX_MEM="256" is 256Mbyte of memory
+MAX_MEM="20"
+
+# Maximum amount of Processes, this is amount of processes for the executable
+# e.g: httpd, sendmail, exim
+MAX_PROC="50"
+
+# Maximum run time, elapsed time, format is dd-hh:mm:ss
+# e.g: 1h = 1:00:00, 1d = 1-00:00:00, 30m = 30:00
+MAX_ETIME=""
+
+
+##
+# [ Process Priority Settings ]
+# This feature uses the priority rule files located under /usr/local/prm/prios/
+# to set scheduler priorities on processes. This allows the system to queue processes
+# at priority levels relative to importance to effectively discipline the system on
+# which tasks gets resources first.
+# (integration of spri http://www.rfxn.com/projects/system-priority/)
+##
+
+# Process CPU scheduling priority levels for ordered process execution
+# Nice values range from -20 (most favorable scheduling) to 19 (least favorable)
+NICE_DEFAULT="10"
+NICE_HIGH="4"
+NICE_MED_HIGH="6"
+NICE_MED="8"
+NICE_MED_LOW="12"
+NICE_LOW="19"
+
+# Process IO scheduling priority levels for ordered process IO access
+# Nice values range from 0 (most favorable scheduling) to 7 (least favorable)
+# (uses cbq best-effort scheduling class [-c2])
+IONICE_DEFAULT="5"
+IONICE_HIGH="2"
+IONICE_MED_HIGH="3"
+IONICE_MED="4"
+IONICE_MED_LOW="6"
+IONICE_LOW="7"
+
+# How many top usage processes to change the CPU & IO priority for and the respective
+# priorities to change them too; default is NICE 9 and IONICE 5 which is a MEDLOW
+# priority.
+TOP_PROCS="5"
+NICE_TOP="16"
+IONICE_TOP="6"
+
+##
+# [ Process Kill Settings ]
+# NOTE: these variables may be used in rule files, these are defaults when a
+# rule file does not define them!
+##
+
+# How many soft failures before a process is killed (TRIG*WAIT=time to kill)
+# Resources are rechecked after each failure, each recheck is after WAIT time
+KILL_TRIG="3"
+
+# How long to wait between rechecking process resource usage
+KILL_WAIT="10"
+
+# Kill the parent process (ppid) and children of parent
+# e.g: would kill shell of a forkbomb and all processes spawned from the shell
+# e.g: would kill the parent threader process of apache and all children
+# [0 = disabled, 1 = enabled]
+KILL_PARENT="1"
+
+# Kill all processes under a user upon the first hard failure for that user
+# [0 = disabled, 1 = enabled]
+KILL_USER_PSTREE="0"
+
+# The lowest accepted user-id that KILL_USER_PSTREE will apply against
+KILL_USER_PSTREE_MINUID="500"
+
+# Kill signal (kill -l); SIGKILL (9) RECOMMENDED
+KILL_SIG="9"
+
+# This has no real global usage but on a per rule basis you could use this to
+# restart a specific service when a kill event happens. This is useful if you
+# have KILL_PARENT enabled which will effectively kill a service such as apache.
+# e.g: KILL_RESTART_CMD="/etc/init.d/httpd restart"
+KILL_RESTART_CMD=""
+
+##
+# [ Logging ]
+##
+# The path to the prm execution log file, all prm actions are recorded to this file
+LOG_FILE=$inspath/logs/prm.log
+
+# The path to the prm process kill log, all killed processes are recorded to this file
+LOG_FILE_KILL=$inspath/logs/kill.log
+
+# This enables logging to the syslog service, with default level of crit this
+# goes to /var/log/messages on most systems
+# [0 = disabled, 1 = enabled]
+LOG_SYSLOG="0"
+
+# The syslog log level, crit default
+LOG_LEVEL="crit"

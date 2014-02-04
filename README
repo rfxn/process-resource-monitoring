@@ -1,0 +1,259 @@
+ Process Resource Monitor (PRM) v1.1.4
+             (C) 2002-2012, R-fx Networks <proj@r-fx.org>
+             (C) 2012, Ryan MacDonald <ryan@r-fx.org>
+ This program may be freely redistributed under the terms of the GNU GPL v2
+
+::::::::::::::::::::::::::::::::::
+
+:: CONTENTS ::
+.: 1 [ DESCRIPTION ]
+.: 2 [ FEATURES ]
+.: 3 [ CONFIGURATION ]
+.: 4 [ RULE FILES ]
+.: 5 [ IGNORE OPTIONS ]
+.: 6 [ CRON ]
+
+::::::::::::::::::::::::::::::::::
+
+.: 1 [ DESCRIPTION ]
+Process Resource Monitor (PRM) is a CPU, Memory, Processes & Run (Elapsed) Time 
+resource monitor for Linux & BSD. The flexibility of PRM is achieved through
+global scoped resource limits or rule-based per-process / per-user limits. A
+great deal of control of PRM is maintained through a number of ignore options,
+ability to configure soft/hard kill triggers, wait/recheck timings and to send
+kill signals to parent/children process trees. Additionally, the status output
+is very verbose by default with support for sending log data through syslog.
+
+There is no shortage of usage methods for PRM, especially when leveraging the
+ignore and kill options with the rule based system. You can easily take control
+of those run-away aspell/pspell processes eating 80% of memory, errant exim
+processes threading off 500 processes or prevent scripts executed under apache
+from running for hours at a time.
+
+.: 2 [ FEATURES ]
+- global resource limits
+- per-process/per-user rule based resource limits
+- rules only run mode
+- alert only run mode
+- ignore root processes option
+- process list global ignore file
+- user based global ignore file
+- command based global ignore file
+- regex based global and/or per-rule ignore variable
+- global scoped resource limits
+- per-process or per user rule based resource limits
+- set custom kill signals (i.e: SIGHUP)
+- parent process kill option to terminate an entire process tree
+- kill trigger/wait times allow rechecking usage over a period of time
+- kill restart option to execute a custom restart command
+- all kill/resource/ignore options can be global or rule defined
+- easy to configure percentage of total CPU & MEM limits
+- total number of processes limits
+- elapsed run time limits
+
+.: 3 [ CONFIGURATION ]
+The configuration file is very well commented so there is not a whole lot to
+cover here but for the sake of clarity, I will list some of the more important
+variables and expand on there usage (the values here are the defaults).
+
+RULES_ONLY="1"
+This tells PRM that we will ONLY check limits against processes that we can find
+a matching rule for. When this is not set, all processes will be checked against
+the global resource limits defined in conf.prm, however, if a rule match for a
+process is found, it will still be processed under the respective rule.
+
+IGNORE_ROOT="1"
+This tells PRM to ignore any root owned processes, however, when the KILL_PARENT
+option is set, root owned parent processes will still be subject to kills. As
+a saftey measure there is a KILL_MINPID variable in the internals.conf file that
+controls the lowest possible PID that PRM will kill, default is 150. This is
+intended to prevent PRM from trying to kill important parent threaders such as
+init.
+
+IGNORE=""
+This is an important option and is the recommended method for ignoring when
+using the rules system. The accepted values are basic and extended regexp, which
+use pipes (|) as a spacer. For example, IGNORE="^httpd$|^sendmail$", when placed
+in a rule called nobody.user, would ignore any processes under user nobody that
+have the command name of exactly "httpd" or "sendmail". It is important that you
+try to use the ^NAME$ convention as this limits the scope of the ignore option
+and can prevent some rather weird and unexpected behavior.
+
+MAX_ETIME=""
+This is the elapsed run time for a process, there really isnt much to this value
+except that the format requires a bit of explaining. The accepted format is in
+the form of DD-HH:MM:ss, this can be broken apart or kept in full length such
+as the following example values:
+1h = 1:00:00, 1h = 00-01:00:00, 1d = 1-00:00:00, 30m = 30:00
+
+KILL_TRIG="3"
+KILL_WAIT="10"
+These values control the soft rechecks of a process, allowing for a process to
+have its resources rechecked TRIG times with WAIT time between checks, giving a
+bit of margin for a process to "burst" resources and come back into normal use.
+The max time to kill a process is equal to TRIG*WAIT, these values can be set 0
+if you want to instantly kill offending processes.
+
+KILL_PARENT="1"
+This is an important option that should in most cases be enabled, it allows for
+the parent process and children of the parent to be killed. This is important as
+when a process is created by a parent threader (such as apache), when the child
+disappears, the parent will simply fork off a new child thread to replace it.
+With this enabled, the parent process (ppid) is killed and all child processes
+of the parent. As a saftey measure, ppid's lower than KILL_MINPID set in the
+internals.conf file (default 150), are never killed. In situations where uptime
+is of importance, such as an apache rule, you can use KILL_RESTART_CMD to have
+a command executed after the kills are completed.
+
+KILL_SIG="9"
+In some custom situations, it may be desired to send signals other than SIGTERM
+(9) to a process or parent/child process tree. An example of this would be a
+service such as apache or named that will take a SIGHUP and complete all pending
+requests before conducting a reload. For a list of signals please see 'kill -l',
+only the numeric representation of a signal is accepted.
+
+KILL_RESTART_CMD=""
+This is an optional command executed after kill signals are sent, the intended
+goal of this feature is to send restart commands to a service for the purpose
+of maintaining uptime. An example here would be on an apache rule, you can have
+the option set something like: KILL_RESTART_CMD="/etc/init.d/httpd restart"
+
+.: 4 [ RULE FILES ]
+The rules system has two methods of use, the first is a user based rule and the
+second is a process command based rule. The naming of the rules is very specific
+and PRM will look for only the rules that match a specific processes user or cmd
+values.
+
+The rules path is located at /usr/local/prm/rules/ and the naming conventions
+are as follows:
+
+USERNAME.user
+COMMAND.cmd
+
+For example, to create a rule for user "mike" you would create rules/mike.user,
+to create a rule for apache processes you would create rules/httpd.cmd or for
+the apache user "nobody" you would create rules/nobody.user. It is important to
+remember that .cmd rules only apply to the specific command process but user
+rules apply to ALL processes running under that user. 
+
+The following variables can be used in rule files, please see conf.prm comments
+for description of what each variable does, any variable not included in a rule
+file will have its value set from conf.prm (# can be used as comments):
+
+IGNORE
+MAX_CPU
+MAX_MEM
+MAX_PROC
+MAX_ETIME
+KILL_TRIG
+KILL_WAIT
+KILL_PARENT
+KILL_SIG
+KILL_RESTART_CMD
+
+Lets look at a few example rules. The first is an apache user rule under user
+"nobody", the goal of this rule is to control processes that fork from scripts
+on user websites, to make sure they stay within certain resource limits and to
+make sure they do not run beyond 10 minutes. Since we only care about what is
+being forked off of apache, we want to ignore the httpd threads themselves and
+any other trusted apache related processes such as suphp, cgiwrap and suexec.
+
+file rules/nobody.user:
+IGNORE="^httpd$|^suexec$|^suphp$|^cgiwrap$|^spamd$"
+MAX_CPU="50"
+MAX_MEM="10"
+MAX_PROC="25"
+MAX_ETIME="10:00"
+KILL_TRIG="3"
+KILL_WAIT="10"
+# We need to kill parent here otherwise the HTTP Request that spawned the
+# script we are trying to kill, will probably just respawn it.
+KILL_PARENT="1"
+KILL_SIG="9"
+KILL_RESTART_CMD="/etc/init.d/httpd restart"
+
+The second rule, is one intended to stop run away java processes on a custom
+application from consuming all memory by forking off lots of java processes,
+each using a bunch of memory.
+
+file rules/java.cmd:
+
+IGNORE=""
+MAX_CPU="99"
+MAX_MEM="30"
+MAX_PROC="100"
+# we dont care about the process run time, set value 0 to disable check
+MAX_ETIME="0"
+KILL_TRIG="3"
+# we want to set a bit longer soft rechecks as sometimes the problem fixes
+# itself
+KILL_WAIT="20"
+KILL_PARENT="1"
+KILL_SIG="9"
+KILL_RESTART_CMD="/etc/init.d/openfire restart"
+
+The third and final example is for a sendmail server where web scripts that
+call the sendmail executable directly can sometimes cause hundres of processes
+to spawn.
+
+file rules/sendmail.cmd
+IGNORE=""
+MAX_CPU="0"
+MAX_MEM="0"
+# we only care about process counts, so we zero the other MAX_ settings
+MAX_PROC="100"
+MAX_ETIME="0"
+KILL_TRIG="3"
+KILL_WAIT="10"
+KILL_PARENT="1"
+KILL_SIG="9"
+KILL_RESTART_CMD="/etc/init.d/sendmail restart"
+
+.: 5 [ IGNORE OPTIONS ]
+There is a number of ignore options available for PRM, they fall into the static
+ignore files and then the dynamic IGNORE variable that can be included into rule
+files.
+
+The static ignore files and there usage are as follows:
+
+ignore_pslist
+This is a top level ignore file applied when the /bin/ps command is run, this is
+not recommended to be used unless you absolutely must. Ignore strings in this
+file should be very specific and caution taken as short strings may get broadly
+applied across the process list. 
+
+ignore_cmd
+This ignore file applys directly to the command value of processes and avoids
+broadly applied ignore values that are an issue with the _pslist ignore file.
+When a process is found to match an entry in this file, it will stop processing
+and PRM will move on.
+
+ignore_users 
+This ignore file applys directly to the username value of processes and avoids
+broadly applied ignore values that are an issue with the _pslist ignore file.
+When a process is found to match an entry in this file, it will stop processing
+and PRM will move on.
+
+The hands down best way to create ignore conditions is with the IGNORE variable
+inside of rule files, this variable allows for exact definition of what should
+be ignored. The IGNORE variable is applied against the user and cmd values of
+the process, whichever matches first, in the order of user>command. 
+
+IGNORE=""
+This is an important option and is the recommended method for ignoring when
+using the rules system. The accepted values are basic and extended regexp, which
+use pipes (|) as a spacer. For example, IGNORE="^httpd$|^sendmail$", when placed
+in a rule called nobody.user, would ignore any processes under user nobody that
+have the command name of exactly "httpd" or "sendmail". It is important that you
+try to use the ^NAME$ convention as this limits the scope of the ignore option
+and can prevent some rather weird and unexpected behavior.
+
+.: 6 [ CRON ]
+The default execution of PRM is handled through /etc/cron.d/prm and set to run
+at 5 minute intervals, you may increase this at your own discretion. You are
+warned though, that if your system has hundreds of processes with many process
+events on a run of PRM, it can take a couple of minutes to complete.
+
+As a measure of protection from PRM stepping on its own toes, there is a lock
+file feature that times out after 10 minutes, you can change the lock timeout
+in internals.conf using the LOCK_TIMEOUT variable.

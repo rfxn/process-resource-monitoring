@@ -1,0 +1,4 @@
+mysqld_safe
+mysqld
+postmaster
+postgres

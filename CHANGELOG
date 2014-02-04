@@ -1,0 +1,120 @@
+1.1.4 - Jan 19th 2014:
+[Change] modified priority control files to be more granular: high, med, med-high, med, med-low, low
+[Change] updated conf.prm to support CPUNICE/IONICE values for the new med-high and med-low prio levels
+
+1.1.3 - Apr 27th 2012:
+[Change] reordered process kill evaluation in the order of ETIME, PROCS, MEMORY, CPU
+[Change] shell command paths now auto discovered through the which command for better
+         interoperability between Linux flavors
+[Fix] LOGGER path variable had an incorrect path prefix associated with it
+[Change] MAX_PROC implicitly invokes hard fail state to combat quickly forking processes
+[Change] logging data now stores to INSTALL_PATH/logs/
+[Change] the prm action log previously located at INSTALL_PATH/log_prm is now located at
+         INSTALL_PATH/logs/prm.log; symlink created to old path for compatibility
+[New] created kill action log at INSTALL_PATH/logs/kill.log which records the time stamp and 'ps' output
+      of all prm process kill actions
+[Change] logging host mask no longer called through `hostname -s` on every log file transaction
+[Change] deprecated the old -s|--standard cli argument, -c|--check is now the normal verbose execution mode
+[Change] modified the -t|--top feature to include memory usage and overall kill stats
+[New] added -s|--scores feature to display scoreboard of all kill events sorted by username
+[Change] log files are now preserved through PRM upgrades
+
+1.1.2 - Mar 14th 2012:
+[Fix] corrected trailing white space on child_pidlist variable
+[Change] all event output has been modified to a more consistent format making it easily
+         parsable for statistical analysis and graphing
+[Change] event output now includes the full command arguments for the 'cmd' field
+[Fix] corrected sort priority issues with -t|--top feature
+[Change] execution flow modified for better performance on I/O or CPU bound systems
+
+1.1.0 - Jan 12th 2012:
+[Fix] punctuation was being removed from the cmd value changing the expected command rules
+      file names
+[Fix] corrected excess line return feeding into the log file
+[Change] disabled output when a process exits soft fail or disappears under PRM (terminates),
+         it just served to spam logs and console
+[New] added -l|--log to view prm log file
+[New] added setnice() feature to set the IO & CPU priority of the top TOP_PROCS highest usage
+      processes sorted by by CPU & MEM to [IO]NICE_TOP values, defaults to a medium-low prio
+[Change] ignore processes with nice values less than 0 (RT) as these are either kernel processes
+         or those set implicitly to real-time priority by the user
+[New] added -t|--top N watch option to display top N (default 15) processes sorted by CPU & MEM
+[Change] CLI flags -s|--standard changed to -c|--check, old flag support preserved 
+[Change] MAX_MEM now accepts values in the format of: 1-99 is percentage of total memory,
+         100+ is Mbyte resident set size (RSS)
+[Fix] on clearing of stale lock files, prm would fail to update the current running pid
+      and last execution time
+[New] expanded spri functions to handle IO niceness priority scheduling
+[New] integrated System Priority (SPRI) for CPU niceness priority scheduling
+[New] added prios/ path containing high,med,low files for classing applications into respective
+      priority groups
+[New] added [IO]NICE_HIGH|MED|LOW|DEFAULT to conf.prm for configuring priority classing
+[Change] modified ps output caching for improved performance
+[Change] modified checked processes summary at program termination to include total run time
+
+1.0.8 - Nov 11th 2011:
+[Change] MAX_ETIME implicitly invokes hard kill state as it is an exponentially increasing value
+         that will never come out of soft fail state
+[Change] cli verbosity decreased slightly and a more graceful output format is now presented
+[Fix] owner/permissions on installation files are now consistent
+
+1.0.7 - Aug 14th 2010:
+[Fix] removed exit on file not found for expr/bc as they are no longer used
+[Fix] invalid nice arguments for ps cmd when populating $child_pidlist
+[Fix] integer expression error fixed in kill_check()
+[Change] ETIME value now shows full colon spaced value in alerts
+[Change] CMD value now shows full command value in alerts
+ 
+1.0.6 - May 24th 2010:
+[New] complete rewrite of most functions and operating logic
+[New] changed versioning scheme
+      [MAJOR].[MINOR].[REV]
+      1       0       6
+[New] MAX_ETIME for setting max run time of processes
+[New] string based, regex format, IGNORE variable for rules
+[New] KILL_PARENT to kill parent pid and child processes
+[New] KILL_SIG to set custom kill signals (kill -l)
+[New] rule files now have a user and command based format
+[New] command based global ignore file: ignore_cmd
+[New] user based global ignore file: ignore_user
+[New] top level /bin/ps output ignore file: ignore_pslist
+[New] IGNORE_ROOT to ignore all root owned processes
+[New] RULES_ONLY to ignore any process not matching a rule
+[New] ALERT_ONLY to not perform any kills, send only alert
+[New] KILL_RESTART_CMD to execute an after-kill command
+[Change] rewrote entire README to reflect changes
+[Change] moved project to GPLv2 licensing
+[Fix] default cron permissions now set to 0644
+[New] email alerts now generated from template: email.tpl
+[Change] split internal variables into internals.conf
+[Change] conf.prm is now better commented
+
+0.5:
+[New] added proc counting; MAXPS
+[Change] changed comment headers
+[Change] changed all references of r-fx.net to r-fx.org
+[Change] get_state() now uses unix time for lock file
+[Change] increased default httpd & mysql maxproc settings
+
+0.4:
+[Change] log format changes; syslog style
+[New] kernel logging feature
+[New] get_state(), prevent multiple instances
+[New] -j runtime option to toggle prm on or off
+[Fix] various fixes to treatment of 'cmd' ps colum
+[Change] alert output changes
+[Change] load abort routine ignored from klog
+
+0.3: 
+[Fix] ignore file excempting cmd values; fixed
+[Change] default conf.prm values modified
+[Change] default ignore values modified
+[Change] exported e-mail alert contents to usr.msg
+[New] process rule disciplines feature
+
+0.2:
+[New] added auto-cronjob setup to installer
+[Fix] fixed string error with grep of ignore file
+
+0.1:
+Inital release
