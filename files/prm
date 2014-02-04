@@ -132,10 +132,20 @@ pre() {
         if [ ! -f "$IGNORE_USER" ]; then
                 touch $IGNORE_USER
                 chmod 640 $IGNORE_USER
+	else
+		sed -i '/^$/d' $IGNORE_USER
         fi
         if [ ! -f "$IGNORE_CMD" ]; then
                 touch $IGNORE_CMD
                 chmod 640 $IGNORE_CMD
+	else
+		sed -i '/^$/d' $IGNORE_CMD
+        fi
+        if [ ! -f "$IGNORE_PSLIST" ]; then
+                touch $IGNORE_PSLIST
+                chmod 640 $IGNORE_PSLIST
+	else
+		sed -i '/^$/d' $IGNORE_PSLIST
         fi
 }
 

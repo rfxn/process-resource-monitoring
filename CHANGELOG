@@ -1,4 +1,5 @@
 1.1.4 - Jan 19th 2014:
+[Change] modified pre() function to strip empty lines from ignore files, which if present, can cause all procs to be ignored
 [Change] modified priority control files to be more granular: high, med, med-high, med, med-low, low
 [Change] updated conf.prm to support CPUNICE/IONICE values for the new med-high and med-low prio levels
 
