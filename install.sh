@@ -5,6 +5,8 @@ BINPATH="/usr/local/sbin/prm"
 if [ -d "files" ] && [ ! -d "$INSPATH" ]; then
         mkdir -p $INSPATH
         mkdir -p $INSPATH/logs
+	mkdir -p $INSPATH/rules
+	mkdir -p $INSPATH/tmp
 	chmod 750 $INSPATH
         cp -R files/* $INSPATH
         chmod 640 $INSPATH/* $INSPATH/rules/* >> /dev/null 2>&1
