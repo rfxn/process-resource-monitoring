@@ -43,6 +43,13 @@ echo ".: PRM installed"
 echo "Install path:    $INSPATH"
 echo "Config path:     $INSPATH/conf.prm"
 echo "Executable path: $BINPATH"
-if [ "$cron" == "1" ]; then
-echo "CronJob path:    /etc/cron.d/prm"
+if [ "$BASH_VERSION" = '' ]; then
+	if [ "$cron" = "1" ]; then
+		echo "CronJob path:    /etc/cron.d/prm"
+	fi
+else
+	if [ "$cron" == "1" ]; then
+		echo "CronJob path:    /etc/cron.d/prm"
+	fi
 fi
+
