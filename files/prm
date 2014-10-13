@@ -7,7 +7,7 @@
 # This program may be freely redistributed under the terms of the GNU GPL v2
 ##
 #
-
+nice=`which nice`
 inspath=/usr/local/prm
 cnf=$inspath/conf.prm
 intcnf=$inspath/internals.conf
@@ -159,10 +159,10 @@ get_pslist() {
                 chmod 640 $IGNORE_PSLIST
         fi
         if [ "$IGNORE_ROOT" == "1" ]; then
-                /bin/nice -n 19 /bin/ps --no-headers --user root -N -o "ppid pid user pcpu pmem rss etime nice comm cmd" --sort comm | grep -vwf $IGNORE_PSLIST > $PSLIST_CACHE
-                /bin/nice -n 19 /bin/ps --no-headers -A -o "ppid pid user pcpu pmem rss etime nice comm cmd" --sort comm > $PSLIST_CACHE.full
+                $nice -n 19 /bin/ps --no-headers --user root -N -o "ppid pid user pcpu pmem rss etime nice comm cmd" --sort comm | grep -vwf $IGNORE_PSLIST > $PSLIST_CACHE
+                $nice -n 19 /bin/ps --no-headers -A -o "ppid pid user pcpu pmem rss etime nice comm cmd" --sort comm > $PSLIST_CACHE.full
         else
-                /bin/nice -n 19 /bin/ps --no-headers -A -o "ppid pid user pcpu pmem rss etime nice comm cmd" --sort comm > $PSLIST_CACHE.full
+                $nice -n 19 /bin/ps --no-headers -A -o "ppid pid user pcpu pmem rss etime nice comm cmd" --sort comm > $PSLIST_CACHE.full
                 cat $PSLIST_CACHE.full | grep -vwf $IGNORE_PSLIST > $PSLIST_CACHE
         fi
 }
@@ -172,9 +172,9 @@ recheck_proc() {
 rpid=$1
 col=$2
 if [ "$col" == "proc" ]; then
-        rval=`/bin/nice -n 19 /bin/ps --no-headers -C $cmd -o "pid comm" | wc -l | awk '{print$1}'`
+        rval=`$nice -n 19 /bin/ps --no-headers -C $cmd -o "pid comm" | wc -l | awk '{print$1}'`
 else
-        rval=`/bin/nice -n 19 /bin/ps --no-headers -p $rpid -o "pid $col" | awk '{print$2}' | cut -d'.' -f1 | tr -d '\:-'`
+        rval=`$nice -n 19 /bin/ps --no-headers -p $rpid -o "pid $col" | awk '{print$2}' | cut -d'.' -f1 | tr -d '\:-'`
 fi
 if [ "$rval" == "" ]; then
         rval=0
@@ -290,7 +290,7 @@ if [ "$PS_VAL" -ge "$MAX_VAL" ] && [ ! "$MAX_VAL" == "0" ]; then
 
  if [ "$fcnt" -ge "$KILL_TRIG" ]; then
         if [ "$KILL_PARENT" == "1" ] && [ "$ppid" -gt "$KILL_MINPID" ]; then
-                child_pidlist=`/bin/nice -n 19 /bin/ps --pid $pid -o "pid" --ppid $ppid --no-headers | tr '\n' ' '`
+                child_pidlist=`$nice -n 19 /bin/ps --pid $pid -o "pid" --ppid $ppid --no-headers | tr '\n' ' '`
                 child_pidlist="${child_pidlist%?}"
                 for i in `echo $child_pidlist`; do
                         if [ "$pidlist" ]; then
@@ -543,7 +543,7 @@ prmtop() {
                 echo
          fi
          echo "CPU% MEM% PID USER CMD" | tr ' ' '\t' ;
-         /bin/nice -n 19 /bin/ps --no-headers -A -o "ppid pid user pcpu pmem rss etime comm cmd" --sort comm | awk '{print$4"\t"$5"\t"$2"\t"$3"\t"$9}' | sort -n -t$'\t' -k2,1 | tail -n$procs | tac
+         $nice -n 19 /bin/ps --no-headers -A -o "ppid pid user pcpu pmem rss etime comm cmd" --sort comm | awk '{print$4"\t"$5"\t"$2"\t"$3"\t"$9}' | sort -n -t$'\t' -k2,1 | tail -n$procs | tac
          if [ -z "$watch" ]; then
                 exit
          fi
