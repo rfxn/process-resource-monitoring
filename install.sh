@@ -5,6 +5,8 @@ BINPATH="/usr/local/sbin/prm"
 if [ -d "files" ] && [ ! -d "$INSPATH" ]; then
         mkdir -p $INSPATH
         mkdir -p $INSPATH/logs
+	mkdir -p $INSPATH/rules
+	mkdir -p $INSPATH/tmp
 	chmod 750 $INSPATH
         cp -R files/* $INSPATH
         chmod 640 $INSPATH/* $INSPATH/rules/* >> /dev/null 2>&1
@@ -43,6 +45,13 @@ echo ".: PRM installed"
 echo "Install path:    $INSPATH"
 echo "Config path:     $INSPATH/conf.prm"
 echo "Executable path: $BINPATH"
-if [ "$cron" == "1" ]; then
-echo "CronJob path:    /etc/cron.d/prm"
+if [ "$BASH_VERSION" = '' ]; then
+	if [ "$cron" = "1" ]; then
+		echo "CronJob path:    /etc/cron.d/prm"
+	fi
+else
+	if [ "$cron" == "1" ]; then
+		echo "CronJob path:    /etc/cron.d/prm"
+	fi
 fi
+
